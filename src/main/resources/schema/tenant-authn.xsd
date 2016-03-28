@@ -1,0 +1,32 @@
+<schema targetNamespace="http://illinicloud.org/idp/tenant/authn" xmlns="http://www.w3.org/2001/XMLSchema"
+        xmlns:ph="urn:mace:shibboleth:2.0:idp:profile-handler" elementFormDefault="qualified">
+
+    <import namespace="urn:mace:shibboleth:2.0:idp:profile-handler" schemaLocation="classpath:/schema/shibboleth-2.0-idp-profile-handler.xsd" />
+
+    <complexType name="TenantUsernamePassword">
+        <complexContent>
+            <extension base="ph:LoginHandlerType">
+                <sequence maxOccurs="1">
+                    <element name="Encryption">
+                        <complexType>
+                            <sequence>
+                                <element name="algorithm" type="string"/>
+                                <element name="password" type="string"/>
+                            </sequence>
+                        </complexType>
+                    </element>
+                    <element name="Database">
+                        <complexType>
+                            <sequence>
+                                <element name="jndiName" type="string"/>
+                                <element name="numOfDistricts" type="integer"/>
+                            </sequence>
+                        </complexType>
+                    </element>
+                </sequence>
+                <attribute name="authenticationServletURL" type="string"/>
+            </extension>
+        </complexContent>
+    </complexType>
+
+</schema>
