@@ -113,6 +113,7 @@ public class TenantLdapLoginModule extends AbstractLoginModule {
             loginSuccess = false;
             throw new LoginException(e != null ? e.getMessage() : "Authentication Error");
         }
+
         return true;
     }
 

@@ -18,9 +18,11 @@ import org.ldaptive.*;
 import org.ldaptive.auth.Authenticator;
 import org.ldaptive.auth.PooledBindAuthenticationHandler;
 import org.ldaptive.auth.PooledSearchDnResolver;
-import org.ldaptive.auth.PooledSearchEntryResolver;
 import org.ldaptive.cache.LRUCache;
 import org.ldaptive.pool.*;
+import org.ldaptive.provider.jndi.JndiProvider;
+import org.ldaptive.provider.jndi.JndiProviderConfig;
+import org.ldaptive.ssl.AllowAnyHostnameVerifier;
 import org.ldaptive.ssl.KeyStoreCredentialConfig;
 import org.ldaptive.ssl.SslConfig;
 import org.slf4j.Logger;
@@ -148,18 +150,20 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
     }
 
     protected void initializePools() {
+
+        Integer timeout = new Integer (5000);
+
         KeyStoreCredentialConfig credentialConfig = new KeyStoreCredentialConfig();
         credentialConfig.setTrustStore("classpath:/cacerts");
         credentialConfig.setTrustStorePassword("changeit");
         SslConfig sslConfig = new SslConfig(credentialConfig);
-        Integer timeout = new Integer (5000);
+        AllowAnyHostnameVerifier allowAnyHostnameVerifier = new AllowAnyHostnameVerifier();
 
         for (Map.Entry<String, Map> entry : tenants.entrySet()) {
             String key = entry.getKey();
             Map<String,String> value = entry.getValue();
             PoolConfig poolConfig = new PoolConfig();
-            DefaultConnectionFactory cf = new DefaultConnectionFactory();
-            LRUCache<SearchRequest> cache = new LRUCache<SearchRequest>(50, 600, 300);
+
             String ldapURL = "ldap://" + value.get("host") + ":" + value.get("port");
             ConnectionConfig connectionConfig = new ConnectionConfig();
             connectionConfig.setSslConfig(sslConfig);
@@ -167,14 +171,22 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
             connectionConfig.setConnectTimeout(timeout.longValue());
             connectionConfig.setResponseTimeout(timeout.longValue());
             connectionConfig.setLdapUrl(ldapURL);
-            connectionConfig.setConnectionInitializer(new BindConnectionInitializer(value.get("account"),new Credential(value.get("password"))));
-            cf.setConnectionConfig(connectionConfig);
+            connectionConfig.setConnectionInitializer(new BindConnectionInitializer(value.get("account"), new Credential(value.get("password"))));
+
+            JndiProviderConfig jndiProviderConfig = new JndiProviderConfig();
+            jndiProviderConfig.setHostnameVerifier(allowAnyHostnameVerifier);
+            JndiProvider jndiProvider = new JndiProvider();
+            jndiProvider.setProviderConfig(jndiProviderConfig);
+
+            DefaultConnectionFactory cf = new DefaultConnectionFactory(connectionConfig,jndiProvider);
+            LRUCache<SearchRequest> cache = new LRUCache(50, 600, 300);
 
             BlockingConnectionPool pool = new BlockingConnectionPool(poolConfig, cf);
             pool.setBlockWaitTime(30000);
             pool.setName(key);
             pool.setPruneStrategy(new IdlePruneStrategy());
             /*pool.setValidator(compareValidator);*/
+
             try {
                 pool.initialize();
             } catch (IllegalStateException e) {
@@ -190,6 +202,7 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
             dnResolver.setUserFilter("(" + value.get("filter") + "={user})");
             dnResolver.setSearchCache(cache);
             dnResolver.setSubtreeSearch(true);
+
             PooledBindAuthenticationHandler bindAuthenticationHandler = new PooledBindAuthenticationHandler(connFactory);
             Authenticator auth = new Authenticator(dnResolver,bindAuthenticationHandler);
 
