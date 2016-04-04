@@ -1,1 +1,2 @@
 http\://illinicloud.org/idp/tenant/authn = schema/tenant-authn.xsd
+http\://illinicloud.org/idp/tenant/authn/resolver = schema/tenant-resolver.xsd

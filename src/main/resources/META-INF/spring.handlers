@@ -1,1 +1,2 @@
 http\://illinicloud.org/idp/tenant/authn = org.illinicloud.idp.tenant.authn.TenantAuthnNamespaceHandler
+http\://illinicloud.org/idp/tenant/authn/resolver = org.illinicloud.idp.tenant.authn.resolver.TenantAttributeNamespaceHandler

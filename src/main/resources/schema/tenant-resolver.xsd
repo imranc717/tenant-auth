@@ -1,0 +1,21 @@
+
+
+<schema targetNamespace="http://illinicloud.org/idp/tenant/authn/resolver" xmlns="http://www.w3.org/2001/XMLSchema"
+        xmlns:resolver="urn:mace:shibboleth:2.0:resolver" elementFormDefault="qualified">
+
+    <import namespace="urn:mace:shibboleth:2.0:resolver" schemaLocation="classpath:/schema/shibboleth-2.0-attribute-resolver.xsd" />
+
+    <complexType name="AttributeService">
+        <complexContent>
+            <extension base="resolver:BaseDataConnectorType">
+                <attribute name="lookupUrl" type="string">
+                    <annotation>
+                        <documentation>
+                            The endpoint which services user lookup requests
+                        </documentation>
+                    </annotation>
+                </attribute>
+            </extension>
+        </complexContent>
+    </complexType>
+</schema>
