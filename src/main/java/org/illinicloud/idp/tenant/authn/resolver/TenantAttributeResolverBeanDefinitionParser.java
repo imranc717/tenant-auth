@@ -37,7 +37,7 @@ public class TenantAttributeResolverBeanDefinitionParser extends BaseDataConnect
             pluginBuilder.addPropertyValue("endpoint", pluginConfig.getAttributeNS(null,
                     "lookupUrl"));
         } else {
-            pluginBuilder.addPropertyValue("endpoint", "https://idp-dev.illinicloud.org/idp/Tenant/User/Resolver");
+            log.error("Unable to read lookupUrl from the connector definition");
         }
     }
 }

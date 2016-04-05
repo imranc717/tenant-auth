@@ -60,10 +60,11 @@ public class TenantAttributeResolverServlet extends HttpServlet {
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException,
             IOException {
 
-        String principal = request.getParameter("userPrincipalName");
+        String principal = request.getParameter("userPrincipalName").toLowerCase();
         String user ="";
         String domain = "";
         Map<String, Object> jsonString = new HashMap<String,Object>();
+        ldapEntry = null;
 
         if (principal != null) {
             int indexAmp = principal.indexOf('@');
@@ -72,7 +73,23 @@ public class TenantAttributeResolverServlet extends HttpServlet {
                 if (indexAmp != (principal.length() - 1)) {
                     domain = principal.substring(indexAmp + 1);
                 }
+            } else {
+                log.error("The userPrincipalName in the request, {}, does not contain a domain specifier", principal);
+                String json = new Gson().toJson("The userPrincipalName in the request, " + principal + " does not contain a domain specifier");
+                response.setContentType("application/json");
+                response.setCharacterEncoding("UTF-8");
+                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                response.getWriter().write(json);
+                return;
             }
+        } else {
+            log.error("The principal parameter was not specified in the request");
+            String json = new Gson().toJson("A userPrincipalName must be specified in the request");
+            response.setContentType("application/json");
+            response.setCharacterEncoding("UTF-8");
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            response.getWriter().write(json);
+            return;
         }
 
         if (!domain.equals("") && !user.equals("")) {
@@ -160,6 +177,13 @@ public class TenantAttributeResolverServlet extends HttpServlet {
                 response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
                 response.getWriter().write(json);
             }
+        } else {
+            log.error("Bad request");
+            String json = new Gson().toJson("Bad request. Specify a valid userPrincipalName.");
+            response.setContentType("application/json");
+            response.setCharacterEncoding("UTF-8");
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            response.getWriter().write(json);
         }
     }
 
@@ -183,6 +207,9 @@ public class TenantAttributeResolverServlet extends HttpServlet {
 
             ldapEntry = pooledSearchEntryResolver.resolve(authenticationCriteria,authenticationHandlerResponse);
             authenticationHandlerResponse.getConnection().close();
+            if (connection.isOpen()) {
+                connection.close();
+            }
 
         }
     }

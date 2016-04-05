@@ -22,9 +22,7 @@ import org.ldaptive.cache.LRUCache;
 import org.ldaptive.pool.*;
 import org.ldaptive.provider.jndi.JndiProvider;
 import org.ldaptive.provider.jndi.JndiProviderConfig;
-import org.ldaptive.ssl.AllowAnyHostnameVerifier;
-import org.ldaptive.ssl.KeyStoreCredentialConfig;
-import org.ldaptive.ssl.SslConfig;
+import org.ldaptive.ssl.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -156,13 +154,16 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
         KeyStoreCredentialConfig credentialConfig = new KeyStoreCredentialConfig();
         credentialConfig.setTrustStore("classpath:/cacerts");
         credentialConfig.setTrustStorePassword("changeit");
-        SslConfig sslConfig = new SslConfig(credentialConfig);
-        AllowAnyHostnameVerifier allowAnyHostnameVerifier = new AllowAnyHostnameVerifier();
 
         for (Map.Entry<String, Map> entry : tenants.entrySet()) {
+
             String key = entry.getKey();
             Map<String,String> value = entry.getValue();
+
             PoolConfig poolConfig = new PoolConfig();
+            AllowAnyHostnameVerifier allowAnyHostnameVerifier = new AllowAnyHostnameVerifier();
+            SslConfig sslConfig = new SslConfig(credentialConfig);
+            /*sslConfig.setTrustManagers(new HostnameVerifyingTrustManager(allowAnyHostnameVerifier));*/
 
             String ldapURL = "ldap://" + value.get("host") + ":" + value.get("port");
             ConnectionConfig connectionConfig = new ConnectionConfig();
@@ -173,7 +174,9 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
             connectionConfig.setLdapUrl(ldapURL);
             connectionConfig.setConnectionInitializer(new BindConnectionInitializer(value.get("account"), new Credential(value.get("password"))));
 
+            TLSSocketFactory tlsSocketFactory = new TLSSocketFactory();
             JndiProviderConfig jndiProviderConfig = new JndiProviderConfig();
+            jndiProviderConfig.setSslSocketFactory(tlsSocketFactory);
             jndiProviderConfig.setHostnameVerifier(allowAnyHostnameVerifier);
             JndiProvider jndiProvider = new JndiProvider();
             jndiProvider.setProviderConfig(jndiProviderConfig);
