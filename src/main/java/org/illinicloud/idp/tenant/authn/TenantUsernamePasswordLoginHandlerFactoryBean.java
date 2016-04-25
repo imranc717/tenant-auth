@@ -71,6 +71,7 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
         getTenantConfigs();
         initializePools();
         handler.setTenantPools(authPools);
+        handler.setEncryptor(encryptor);
         return handler;
     }
 

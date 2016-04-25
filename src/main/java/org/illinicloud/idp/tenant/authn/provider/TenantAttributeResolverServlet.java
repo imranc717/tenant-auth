@@ -14,6 +14,7 @@ import edu.internet2.middleware.shibboleth.idp.profile.IdPProfileHandlerManager;
 import org.illinicloud.idp.tenant.authn.TenantUsernamePasswordLoginHandler;
 import org.ldaptive.*;
 import org.ldaptive.auth.*;
+import org.ldaptive.control.util.PagedResultsClient;
 import org.ldaptive.pool.PooledConnectionFactory;
 import org.opensaml.saml2.core.AuthnContext;
 import org.slf4j.Logger;
@@ -21,7 +22,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
 import org.springframework.web.context.support.WebApplicationContextUtils;
 
-import java.io.IOException;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -42,8 +43,14 @@ public class TenantAttributeResolverServlet extends HttpServlet {
     /** Domain Authenticator */
     private Authenticator auth;
 
-    /** LdapEntry that results from lookup against ldap */
+    /** LdapEntry to store results for DN lookup against ldap */
     LdapEntry ldapEntry;
+
+    /** Constant used to represent request for full ldap retrieval */
+    private static final String FULL_LDAP_REQUEST = "populateICFacts";
+
+    /** List to store entries retrieved from full LDAP search */
+    private List<LdapEntry> entryList;
 
     /** {@inheritDoc} */
     public void init(ServletConfig config) throws ServletException {
@@ -60,13 +67,17 @@ public class TenantAttributeResolverServlet extends HttpServlet {
     protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException,
             IOException {
 
-        String principal = request.getParameter("userPrincipalName").toLowerCase();
-        String user ="";
+        String principal = "";
+        String user = "";
         String domain = "";
-        Map<String, Object> jsonString = new HashMap<String,Object>();
+
+        List<Map<String,Object>> attrs;
         ldapEntry = null;
 
-        if (principal != null) {
+        if (request.getParameter("userPrincipalName") != null)
+            principal = request.getParameter("userPrincipalName").toLowerCase();
+
+        if (!principal.equals("")) {
             int indexAmp = principal.indexOf('@');
             if (indexAmp > 0) {
                 user = principal.substring(0, indexAmp);
@@ -106,10 +117,10 @@ public class TenantAttributeResolverServlet extends HttpServlet {
                 return;
             }
 
-            List<Map<String,Object>> attrs = new ArrayList<Map<String,Object>>();
             try {
                 performLdapSearch(user);
-                if (ldapEntry == null) {
+
+                if (ldapEntry == null && entryList == null) {
                   log.error("The user {} doesn't exist in the domain {}",user,domain);
                   String json = new Gson().toJson("The user " + user + " does not exist in the domain " + domain);
                   response.setContentType("application/json");
@@ -119,55 +130,36 @@ public class TenantAttributeResolverServlet extends HttpServlet {
                   return;
                 }
 
-
-                for (final LdapAttribute ldapAttribute : ldapEntry.getAttributes()) {
-                    if(( ldapAttribute.getName().contains("msExch") ) ||
-                        (ldapAttribute.getName().contains("objectGUID")) ||
-                        (ldapAttribute.getName().contains("objectSid")) ||
-                        (ldapAttribute.getName().contains("protocolSettings")))
-                        continue;
-                        if( ldapAttribute.size() <= 1) {
-                            if( ldapAttribute.isBinary() ) {
-                                jsonString.put("attributeName",ldapAttribute.getName());
-                                jsonString.put("isBinary", "true");
-                                jsonString.put("isMultiValue","false");
-                                jsonString.put("attributeLength",ldapAttribute.size());
-                                jsonString.put("attributeValue",ldapAttribute.getBinaryValue());
-
-                            } else {
-                                jsonString.put("attributeName",ldapAttribute.getName());
-                                jsonString.put("isBinary", "false");
-                                jsonString.put("isMultiValue","false");
-                                jsonString.put("attributeLength",ldapAttribute.size());
-                                jsonString.put("attributeValue",ldapAttribute.getStringValue());
-                             }
-                        } else { // more than one value
-                            if( ldapAttribute.isBinary() ) {
-                                jsonString.put("attributeName",ldapAttribute.getName());
-                                jsonString.put("isBinary", "true");
-                                jsonString.put("isMultiValue","true");
-                                jsonString.put("attributeLength",ldapAttribute.size());
-                                jsonString.put("attributeValue",ldapAttribute.getBinaryValues());
-                            } else {
-                                jsonString.put("attributeName",ldapAttribute.getName());
-                                jsonString.put("isBinary", "false");
-                                jsonString.put("isMultiValue","true");
-                                jsonString.put("attributeLength",ldapAttribute.size());
-                                jsonString.put("attributeValue",ldapAttribute.getStringValues());
-                            }
-                        }
-                         attrs.add(jsonString);
-                         jsonString = new HashMap<String,Object>();
+                if (ldapEntry != null) {
+                    attrs = buildJSON(ldapEntry);
+                    if (!attrs.isEmpty()) {
+                        Map<String, List> ldapAttributes = new HashMap<String, List>();
+                        ldapAttributes.put("LDAPAttributes", attrs);
+                        Gson gson = new GsonBuilder().disableHtmlEscaping().create();
+                        String json = gson.toJson(ldapAttributes);
+                        log.trace("Here is the json " + json);
+                        response.setContentType("application/json");
+                        response.setCharacterEncoding("UTF-8");
+                        response.getWriter().write(json);
+                        return;
                     }
+                }
 
-                    Map<String,List> ldapAttributes = new HashMap<String, List>();
-                    ldapAttributes.put("LDAPAttributes",attrs);
-                    Gson gson = new GsonBuilder().disableHtmlEscaping().create();
-                    String json = gson.toJson(ldapAttributes);
-                    log.trace("Here is the json " + json);
+                if (entryList != null && !entryList.isEmpty()) {
                     response.setContentType("application/json");
                     response.setCharacterEncoding("UTF-8");
-                    response.getWriter().write(json);
+                    Gson gson = new GsonBuilder().disableHtmlEscaping().create();
+
+                    for (LdapEntry entry : entryList) {
+                        attrs = buildJSON(entry);
+                        Map<String,List> personAttributes = new HashMap<String,List>();
+                        personAttributes.put("LDAPAttributes",attrs);
+                        String json = gson.toJson(personAttributes);
+                        response.getWriter().write(json);
+                    }
+                        response.getWriter().flush();
+                        return;
+                }
 
             } catch (LdapException e) {
                 log.error(e.getMessage());
@@ -189,28 +181,133 @@ public class TenantAttributeResolverServlet extends HttpServlet {
 
     protected void performLdapSearch(String user) throws LdapException {
 
-        String dn = auth.resolveDn(user);
-
-        if (dn != null) {
-
-            String userRoleAttribute = ReturnAttributes.ALL_USER.value()[0];
-            AuthenticationRequest authenticationRequest = new AuthenticationRequest();
-            authenticationRequest.setReturnAttributes(userRoleAttribute);
+        if (user.equalsIgnoreCase(FULL_LDAP_REQUEST)) {
 
             PooledBindAuthenticationHandler bah = (PooledBindAuthenticationHandler) auth.getAuthenticationHandler();
             PooledConnectionFactory pooledConnectionFactory = bah.getConnectionFactory();
             Connection connection = pooledConnectionFactory.getConnection();
-            PooledSearchEntryResolver pooledSearchEntryResolver = new PooledSearchEntryResolver(pooledConnectionFactory);
 
-            AuthenticationHandlerResponse authenticationHandlerResponse = new AuthenticationHandlerResponse(true,ResultCode.SUCCESS,connection);
-            AuthenticationCriteria authenticationCriteria = new AuthenticationCriteria(dn,authenticationRequest);
+            PooledSearchDnResolver dnResolver = (PooledSearchDnResolver) auth.getDnResolver();
+            String searchDN = dnResolver.getBaseDn();
+            String filter = "(&(|(ObjectCategory=person)(ObjectCategory=user))(ObjectClass=*))";
+            String retAttrs = "*";
+            entryList = new ArrayList<LdapEntry>();
 
-            ldapEntry = pooledSearchEntryResolver.resolve(authenticationCriteria,authenticationHandlerResponse);
-            authenticationHandlerResponse.getConnection().close();
-            if (connection.isOpen()) {
-                connection.close();
+            try {
+                connection.open();
+                PagedResultsClient client = new PagedResultsClient(connection, 50); // return 50 entries at a time
+                SearchRequest searchRequest = new SearchRequest(searchDN,filter,retAttrs);
+                Response<SearchResult> response = client.executeToCompletion(searchRequest);
+                SearchResult result = response.getResult();
+                for (LdapEntry entry : result.getEntries()) {
+                    entryList.add(entry);
+                }
+            } catch (LdapException le) {
+                log.error("Error opening connection to LDAP");
+                throw le;
+            } finally {
+                if (connection.isOpen())
+                    connection.close();
             }
 
+        } else {
+            String dn = auth.resolveDn(user);
+            if (dn != null) {
+
+                String userRoleAttribute = ReturnAttributes.ALL_USER.value()[0];
+                AuthenticationRequest authenticationRequest = new AuthenticationRequest();
+                authenticationRequest.setReturnAttributes(userRoleAttribute);
+
+                PooledBindAuthenticationHandler bah = (PooledBindAuthenticationHandler) auth.getAuthenticationHandler();
+                PooledConnectionFactory pooledConnectionFactory = bah.getConnectionFactory();
+                Connection connection = pooledConnectionFactory.getConnection();
+                PooledSearchEntryResolver pooledSearchEntryResolver = new PooledSearchEntryResolver(pooledConnectionFactory);
+
+                AuthenticationHandlerResponse authenticationHandlerResponse = new AuthenticationHandlerResponse(true,ResultCode.SUCCESS,connection);
+                AuthenticationCriteria authenticationCriteria = new AuthenticationCriteria(dn,authenticationRequest);
+
+                ldapEntry = pooledSearchEntryResolver.resolve(authenticationCriteria,authenticationHandlerResponse);
+                authenticationHandlerResponse.getConnection().close();
+                if (connection.isOpen()) {
+                    connection.close();
+                }
+
+            }
+        }
+    }
+
+    protected List<Map<String,Object>> buildJSON (LdapEntry entry) {
+
+        Map<String, Object> jsonString = new HashMap<String,Object>();
+        List<Map<String,Object>> attrs = new ArrayList<Map<String,Object>>();
+        for (final LdapAttribute ldapAttribute : entry.getAttributes()) {
+            if(( ldapAttribute.getName().contains("msExch") ) ||
+                    (ldapAttribute.getName().contains("protocolSettings")))
+                continue;
+            if( ldapAttribute.size() <= 1) {
+                if( ldapAttribute.isBinary() ) {
+                    jsonString.put("attributeName",ldapAttribute.getName());
+                    jsonString.put("isBinary", "true");
+                    jsonString.put("isMultiValue","false");
+                    jsonString.put("attributeLength",ldapAttribute.size());
+                    jsonString.put("attributeValue",ldapAttribute.getBinaryValue());
+
+                } else {
+                    jsonString.put("attributeName",ldapAttribute.getName());
+                    jsonString.put("isBinary", "false");
+                    jsonString.put("isMultiValue","false");
+                    jsonString.put("attributeLength",ldapAttribute.size());
+
+                    if ((ldapAttribute.getName().contains("objectGUID")) ||
+                            (ldapAttribute.getName().contains("objectSid"))) {
+                        String convertedValue = convertToByteString(ldapAttribute.getBinaryValue());
+                        jsonString.put("attributeValue",convertedValue);
+                    } else {
+                        jsonString.put("attributeValue",ldapAttribute.getStringValue());
+                    }
+                }
+            } else { // more than one value
+                if( ldapAttribute.isBinary() ) {
+                    jsonString.put("attributeName",ldapAttribute.getName());
+                    jsonString.put("isBinary", "true");
+                    jsonString.put("isMultiValue","true");
+                    jsonString.put("attributeLength",ldapAttribute.size());
+                    jsonString.put("attributeValue",ldapAttribute.getBinaryValues());
+                } else {
+                    jsonString.put("attributeName",ldapAttribute.getName());
+                    jsonString.put("isBinary", "false");
+                    jsonString.put("isMultiValue","true");
+                    jsonString.put("attributeLength",ldapAttribute.size());
+                    jsonString.put("attributeValue",ldapAttribute.getStringValues());
+                }
+            }
+            attrs.add(jsonString);
+            jsonString = new HashMap<String,Object>();
+        }
+        return attrs;
+    }
+
+    private static String convertToByteString(byte[] objectGUID) {
+        StringBuilder result = new StringBuilder();
+
+        for (int i = 0; i < objectGUID.length; i++) {
+            String transformed = prefixZeros((int) objectGUID[i] & 0xFF);
+            result.append("\\");
+            result.append(transformed);
+        }
+
+        return result.toString();
+    }
+
+    private static String prefixZeros(int value) {
+        if (value <= 0xF) {
+            StringBuilder sb = new StringBuilder("0");
+            sb.append(Integer.toHexString(value));
+
+            return sb.toString();
+
+        } else {
+            return Integer.toHexString(value);
         }
     }
 }

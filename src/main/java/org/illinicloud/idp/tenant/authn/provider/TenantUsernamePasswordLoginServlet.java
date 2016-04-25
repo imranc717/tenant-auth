@@ -16,6 +16,7 @@ import javax.servlet.http.HttpServletRequest;
 
 import edu.internet2.middleware.shibboleth.idp.authn.provider.UsernamePasswordCredential;
 import org.illinicloud.idp.tenant.authn.TenantUsernamePasswordLoginHandler;
+import org.illinicloud.idp.tenant.authn.utils.TenantLoginConfiguration;
 import org.ldaptive.auth.Authenticator;
 import org.opensaml.saml2.core.AuthnContext;
 import org.opensaml.xml.util.DatatypeHelper;

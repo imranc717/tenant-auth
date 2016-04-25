@@ -1,4 +1,4 @@
-package org.illinicloud.idp.tenant.authn.provider;
+package org.illinicloud.idp.tenant.authn.utils;
 
 import javax.security.auth.login.AppConfigurationEntry;
 import javax.security.auth.login.Configuration;

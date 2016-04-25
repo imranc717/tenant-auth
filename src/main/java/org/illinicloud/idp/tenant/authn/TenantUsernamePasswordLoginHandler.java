@@ -2,6 +2,7 @@ package org.illinicloud.idp.tenant.authn;
 
 import edu.internet2.middleware.shibboleth.idp.authn.provider.AbstractLoginHandler;
 import edu.internet2.middleware.shibboleth.idp.util.HttpServletHelper;
+import org.jasypt.encryption.pbe.StandardPBEStringEncryptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.IOException;
@@ -32,6 +33,9 @@ public class TenantUsernamePasswordLoginHandler extends AbstractLoginHandler {
     /** Map containing all LEA ldap pools */
     private Map<String,Authenticator> tenantPools;
 
+    /** Encryptor used to decrypt bind credentials */
+    private StandardPBEStringEncryptor encryptor;
+
 
     /**
      * Constructor.
@@ -44,7 +48,6 @@ public class TenantUsernamePasswordLoginHandler extends AbstractLoginHandler {
         setSupportsForceAuthentication(true);
         authenticationServletPath = servletPath;
 
-
     }
 
     public Map<String,Authenticator> getTenantPools()
@@ -55,6 +58,13 @@ public class TenantUsernamePasswordLoginHandler extends AbstractLoginHandler {
     public void setTenantPools(Map<String, Authenticator> pools)
     {
         tenantPools = pools;
+    }
+
+    public void setEncryptor(StandardPBEStringEncryptor enc) { encryptor = enc;}
+
+    public StandardPBEStringEncryptor getEncryptor()
+    {
+        return encryptor;
     }
 
     /** {@inheritDoc} */
