@@ -1,18 +1,22 @@
 
 package org.illinicloud.idp.tenant.authn.provider;
 
+import javax.naming.Context;
+import javax.naming.InitialContext;
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import javax.sql.DataSource;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import edu.internet2.middleware.shibboleth.idp.profile.IdPProfileHandlerManager;
 import org.illinicloud.idp.tenant.authn.TenantUsernamePasswordLoginHandler;
 import org.ldaptive.*;
+import org.ldaptive.Connection;
 import org.ldaptive.auth.*;
 import org.ldaptive.control.util.PagedResultsClient;
 import org.ldaptive.pool.PooledConnectionFactory;
@@ -23,10 +27,8 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.web.context.support.WebApplicationContextUtils;
 
 import java.io.*;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.sql.*;
+import java.util.*;
 
 
 public class TenantAttributeResolverServlet extends HttpServlet {
@@ -49,12 +51,23 @@ public class TenantAttributeResolverServlet extends HttpServlet {
     /** Constant used to represent request for full ldap retrieval */
     private static final String FULL_LDAP_REQUEST = "populateICFacts";
 
+    /** Constant representing the action of publishing data to db cache */
+    private static final String ACTION = "publish";
+
     /** List to store entries retrieved from full LDAP search */
     private List<LdapEntry> entryList;
+
+    /** This is the jndi connection managed by the container */
+    private String dbConnection = "java:comp/env/jdbc/FACTS";
+
 
     /** {@inheritDoc} */
     public void init(ServletConfig config) throws ServletException {
         super.init(config);
+
+        if (getInitParameter("jndiName") != null) {
+            dbConnection = getInitParameter("jndiName");
+        }
 
         ServletContext context = config.getServletContext();
         ApplicationContext appCtx = WebApplicationContextUtils.getWebApplicationContext(context);
@@ -70,12 +83,15 @@ public class TenantAttributeResolverServlet extends HttpServlet {
         String principal = "";
         String user = "";
         String domain = "";
+        String action = "";
 
         List<Map<String,Object>> attrs;
         ldapEntry = null;
 
         if (request.getParameter("userPrincipalName") != null)
             principal = request.getParameter("userPrincipalName").toLowerCase();
+        if (request.getParameter("action") != null)
+            action = request.getParameter("action").toLowerCase();
 
         if (!principal.equals("")) {
             int indexAmp = principal.indexOf('@');
@@ -149,7 +165,16 @@ public class TenantAttributeResolverServlet extends HttpServlet {
                     response.setContentType("application/json");
                     response.setCharacterEncoding("UTF-8");
                     Gson gson = new GsonBuilder().disableHtmlEscaping().create();
+                    String dbSessionId;
 
+                    if (!action.equals("") && action.equalsIgnoreCase(ACTION)) {
+                        dbSessionId = publish(domain);
+                        Map<String,String> cid = new HashMap<String,String>();
+                        cid.put("connection_id",dbSessionId);
+                        String json = gson.toJson(cid);
+                        response.getWriter().write(json);
+                        return;
+                    }
                     for (LdapEntry entry : entryList) {
                         attrs = buildJSON(entry);
                         Map<String,List> personAttributes = new HashMap<String,List>();
@@ -164,6 +189,17 @@ public class TenantAttributeResolverServlet extends HttpServlet {
             } catch (LdapException e) {
                 log.error(e.getMessage());
                 String json = new Gson().toJson("An error occurred while fulfilling the request");
+                response.setContentType("application/json");
+                response.setCharacterEncoding("UTF-8");
+                response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                response.getWriter().write(json);
+            } catch (Exception ex) {
+                log.error(ex.getMessage());
+                Map<String,String> error = new HashMap<String,String>();
+                error.put("status","failed");
+                error.put("message", "An error occurred while fulfilling the request");
+                error.put("error", ex.getMessage());
+                String json = new Gson().toJson(error);
                 response.setContentType("application/json");
                 response.setCharacterEncoding("UTF-8");
                 response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
@@ -285,6 +321,102 @@ public class TenantAttributeResolverServlet extends HttpServlet {
             jsonString = new HashMap<String,Object>();
         }
         return attrs;
+    }
+
+    protected String publish(String domain) throws Exception {
+
+        String sessionId = "0";
+        String memberOf = "";
+        String container = "";
+        String sAMAccountName = "";
+        java.sql.Connection connection = null;
+        Statement statement = null;
+        String query = "SELECT CONNECTION_ID();";
+
+        try {
+            Context initialContext = new InitialContext();
+            DataSource dataSource = (DataSource)initialContext.lookup(dbConnection);
+            if (dataSource != null) {
+                connection = dataSource.getConnection();
+            } else {
+                log.error("Failed to lookup datasource");
+                throw new Exception("Failed to lookup datasource");
+            }
+
+            log.trace("Running query to get connection id");
+            statement = connection.createStatement();
+            statement.execute("SET bulk_insert_buffer_size =1024*1024*256;");
+            ResultSet rs = statement.executeQuery(query);
+            while (rs.next()) {
+                sessionId = rs.getString("CONNECTION_ID()");
+            }
+            rs.close();
+            statement.close();
+            log.trace("The connection id is {}", sessionId);
+
+            CallableStatement callableStatement =
+                    connection.prepareCall("{call publishFacts(?, ?, ?, ?, ?)}");
+
+            for (LdapEntry entry : entryList) {
+                for (final LdapAttribute ldapAttribute : entry.getAttributes()) {
+                    if (ldapAttribute.getName().equalsIgnoreCase("memberOf")) {
+                        if (!ldapAttribute.getStringValues().isEmpty()) {
+                            Iterator it = ldapAttribute.getStringValues().iterator();
+                            while (it.hasNext()) {
+                                String member = (String) it.next();
+                                if (memberOf.equals("")) {
+                                    memberOf = member;
+                                } else {
+                                    memberOf = memberOf + "|" + member;
+                                }
+                            }
+                        }
+                    }
+                    if (ldapAttribute.getName().equalsIgnoreCase("distinguishedName")) {
+                        container = ldapAttribute.getStringValue();
+                        Integer position = container.indexOf("OU=");
+                        if (position > 0)
+                            container = container.substring(container.indexOf("OU="));
+                        else
+                            container = "";
+                    }
+                    if (ldapAttribute.getName().equalsIgnoreCase("sAMAccountName")) {
+                        sAMAccountName = ldapAttribute.getStringValue();
+                    }
+                }
+
+                if (memberOf != "") {
+                    callableStatement.setString(1, domain);
+                    callableStatement.setString(2, "IDP");
+                    callableStatement.setString(3, sAMAccountName);
+                    callableStatement.setString(4, memberOf);
+                    callableStatement.setString(5, "|");
+                    callableStatement.addBatch();
+                }
+                if (container != "") {
+                    callableStatement.setString(1, domain);
+                    callableStatement.setString(2, "IDP");
+                    callableStatement.setString(3, sAMAccountName);
+                    callableStatement.setString(4, container);
+                    callableStatement.setString(5, "|");
+                    callableStatement.addBatch();
+                }
+                memberOf = "";
+            }
+            log.trace("Execute batch of function calls against the DB");
+            int[] updateCounts = callableStatement.executeBatch();
+            callableStatement.close();
+            connection.close();
+
+        } catch (Exception ex) {
+            log.error("Failed to publish the directory data to the db cache");
+            throw ex;
+        } finally {
+            if (!connection.isClosed())
+                connection.close();
+        }
+
+        return sessionId;
     }
 
     private static String convertToByteString(byte[] objectGUID) {
