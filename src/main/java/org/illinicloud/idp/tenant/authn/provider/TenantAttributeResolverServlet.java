@@ -87,6 +87,7 @@ public class TenantAttributeResolverServlet extends HttpServlet {
 
         List<Map<String,Object>> attrs;
         ldapEntry = null;
+        entryList = null;
 
         if (request.getParameter("userPrincipalName") != null)
             principal = request.getParameter("userPrincipalName").toLowerCase();

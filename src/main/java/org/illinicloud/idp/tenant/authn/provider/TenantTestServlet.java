@@ -43,6 +43,8 @@ public class TenantTestServlet extends HttpServlet {
     /** Encryptor used to decrypt bind credentials */
     private StandardPBEStringEncryptor encryptor;
 
+    private static final String CONNECTION = "testConnection";
+
     /** {@inheritDoc} */
     public void init(ServletConfig config) throws ServletException {
         super.init(config);
@@ -55,27 +57,24 @@ public class TenantTestServlet extends HttpServlet {
 
     }
 
-    protected void processRequest(HttpServletRequest request, HttpServletResponse response)
+    protected void testConnection(HttpServletResponse response, ConnectionInfo connectionInfo)
             throws ServletException, IOException {
-        response.setContentType("application/json");
-        Gson gson = new Gson();
 
+        Gson gson = new Gson();
         try {
 
-            StringBuilder sb = new StringBuilder();
-            String s;
-
-            while ((s = request.getReader().readLine()) != null) {
-                sb.append(s);
-            }
-
-            ConnectionInfo connectionInfo = gson.fromJson(sb.toString(), ConnectionInfo.class);
-
             Integer timeout = 5000;
-
-            SavingTrustManager savingTrustManager = new SavingTrustManager(new AllowAnyTrustManager());
             SslConfig sslConfig = new SslConfig();
-            sslConfig.setTrustManagers(new TrustManager[] {savingTrustManager});
+            SavingTrustManager savingTrustManager = new SavingTrustManager(new AllowAnyTrustManager());
+
+            if (connectionInfo.getAction().equalsIgnoreCase(CONNECTION)) {
+                sslConfig.setTrustManagers(new TrustManager[] {savingTrustManager});
+            } else {
+                KeyStoreCredentialConfig credentialConfig = new KeyStoreCredentialConfig();
+                credentialConfig.setTrustStore("classpath:/cacerts");
+                credentialConfig.setTrustStorePassword("changeit");
+                sslConfig.setCredentialConfig(credentialConfig);
+            }
 
             String ldapURL = "ldap://" + connectionInfo.getHost() + ":" + connectionInfo.getPort();
             ConnectionConfig connectionConfig = new ConnectionConfig();
@@ -84,8 +83,11 @@ public class TenantTestServlet extends HttpServlet {
             connectionConfig.setConnectTimeout(timeout.longValue());
             connectionConfig.setResponseTimeout(timeout.longValue());
             connectionConfig.setLdapUrl(ldapURL);
-            String pwd = encryptor.decrypt(connectionInfo.getPassword());
-            connectionConfig.setConnectionInitializer(new BindConnectionInitializer(connectionInfo.getAccount(), new Credential(pwd)));
+
+            if (!connectionInfo.getAction().equalsIgnoreCase(CONNECTION)) {
+                String pwd = encryptor.decrypt(connectionInfo.getPassword());
+                connectionConfig.setConnectionInitializer(new BindConnectionInitializer(connectionInfo.getAccount(), new Credential(pwd)));
+            }
 
             DefaultConnectionFactory cf = new DefaultConnectionFactory(connectionConfig);
             Connection connection = cf.getConnection();
@@ -96,24 +98,25 @@ public class TenantTestServlet extends HttpServlet {
                 status.setSuccess(true);
                 status.setDescription("success");
                 connection.close();
+                if (connectionInfo.getAction().equalsIgnoreCase(CONNECTION)) {
+                    if (savingTrustManager.certChain != null) {
+                        log.debug("The chain exists");
+                        X509Certificate[] chain = savingTrustManager.certChain;
 
-                if (savingTrustManager.certChain != null) {
-                    log.debug("The chain exists");
-                    X509Certificate[] chain = savingTrustManager.certChain;
+                        for (int i = 0; i < chain.length; i++) {
+                            X509Certificate cert = chain[i];
+                            log.debug("Chain element " + i + " certificate Subject is " + cert.getSubjectDN());
+                            log.debug("Chain element " + i + " certificate Issuer is " + cert.getIssuerDN());
+                        }
 
-                    for (int i = 0; i < chain.length; i++) {
-                        X509Certificate cert = chain[i];
-                        log.debug("Chain element " + i + " certificate Subject is " + cert.getSubjectDN());
-                        log.debug("Chain element " + i + " certificate Issuer is " + cert.getIssuerDN());
+                        StringWriter sw = new StringWriter();
+                        X509Certificate certificate = chain[(chain.length - 1)];
+                        PEMWriter pw = new PEMWriter(sw);
+                        pw.writeObject(certificate);
+                        pw.flush();
+                        pw.close();
+                        status.setCert(sw.toString());
                     }
-
-                    StringWriter sw = new StringWriter();
-                    X509Certificate certificate = chain[(chain.length - 1)];
-                    PEMWriter pw = new PEMWriter(sw);
-                    pw.writeObject(certificate);
-                    pw.flush();
-                    pw.close();
-                    status.setCert(sw.toString());
                 }
             } else {
                 status.setSuccess(false);
@@ -132,10 +135,36 @@ public class TenantTestServlet extends HttpServlet {
         }
     }
 
+
+
     @Override
     protected void doPost(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
-        processRequest(request, response);
+
+        response.setContentType("application/json");
+        Gson gson = new Gson();
+
+        try {
+            StringBuilder sb = new StringBuilder();
+            String s;
+
+            while ((s = request.getReader().readLine()) != null) {
+                sb.append(s);
+            }
+
+            ConnectionInfo connectionInfo = gson.fromJson(sb.toString(), ConnectionInfo.class);
+            testConnection(response, connectionInfo);
+
+
+            /*processRequest(request, response);*/
+        } catch (Exception ex) {
+            log.error(ex.getMessage());
+            TenantTestStatus status = new TenantTestStatus();
+            status.setSuccess(false);
+            status.setDescription(ex.getMessage());
+            response.getOutputStream().print(gson.toJson(status));
+            response.getOutputStream().flush();
+        }
     }
 
     private static class SavingTrustManager implements X509TrustManager {

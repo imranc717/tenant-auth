@@ -8,6 +8,10 @@ public class ConnectionInfo {
     private String account;
     private String password;
     private String baseDN;
+    private String action;
+    public static final String CONNECTION = "testConnection";
+    public static final String IDP = "testIDPAccount";
+    public static final String SP = "testSPAccount";
 
 
     public void setHost(String hostName) {
@@ -50,6 +54,10 @@ public class ConnectionInfo {
     public String getBaseDN() {
         return baseDN;
     }
+
+    public void setAction(String requestedAction) { action = requestedAction ;}
+
+    public String getAction() { return action; }
 
 }
 
