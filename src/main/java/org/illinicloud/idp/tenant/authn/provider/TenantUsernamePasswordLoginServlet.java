@@ -17,7 +17,9 @@ import javax.servlet.http.HttpServletRequest;
 import edu.internet2.middleware.shibboleth.idp.authn.provider.UsernamePasswordCredential;
 import org.illinicloud.idp.tenant.authn.TenantUsernamePasswordLoginHandler;
 import org.illinicloud.idp.tenant.authn.utils.TenantLoginConfiguration;
-import org.ldaptive.auth.Authenticator;
+import org.ldaptive.auth.PooledSearchDnResolver;
+import org.ldaptive.auth.SearchDnResolver;
+import org.ldaptive.pool.SoftLimitConnectionPool;
 import org.opensaml.saml2.core.AuthnContext;
 import org.opensaml.xml.util.DatatypeHelper;
 import org.slf4j.Logger;
@@ -105,7 +107,7 @@ public class TenantUsernamePasswordLoginServlet extends UsernamePasswordLoginSer
 
             SimpleCallbackHandler cbh = new SimpleCallbackHandler(username, password);
             String orgDn = null;
-            Map <String, Authenticator> options = new HashMap<String, Authenticator>();
+            Map <String, Map<PooledSearchDnResolver,SoftLimitConnectionPool>> options = new HashMap<String, Map<PooledSearchDnResolver, SoftLimitConnectionPool>>();
 
             int indexAmp = username.indexOf('@');
             if (indexAmp > 0) {
@@ -118,7 +120,9 @@ public class TenantUsernamePasswordLoginServlet extends UsernamePasswordLoginSer
                 }
             }
             log.debug("The user organization is {}", orgDn);
-            options.put(orgDn,loginHandler.getTenantPools().get(orgDn));
+            Map<PooledSearchDnResolver,SoftLimitConnectionPool> resolverFactoryPools = new HashMap<PooledSearchDnResolver,SoftLimitConnectionPool>();
+            resolverFactoryPools.put(loginHandler.getSearchDnResolvers().get(orgDn),loginHandler.getPools().get(orgDn));
+            options.put(orgDn, resolverFactoryPools);
             Configuration config = new TenantLoginConfiguration(loginModule,options);
             javax.security.auth.login.LoginContext jaasLoginCtx = new javax.security.auth.login.LoginContext(
                     "name",null,cbh,config);

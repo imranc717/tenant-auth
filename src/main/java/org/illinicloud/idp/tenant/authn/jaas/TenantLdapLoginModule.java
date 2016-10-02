@@ -2,12 +2,12 @@ package org.illinicloud.idp.tenant.authn.jaas;
 
 import org.ldaptive.LdapException;
 import org.ldaptive.ReturnAttributes;
-import org.ldaptive.auth.AuthenticationRequest;
-import org.ldaptive.auth.AuthenticationResponse;
-import org.ldaptive.auth.Authenticator;
+import org.ldaptive.auth.*;
 import org.ldaptive.jaas.*;
 import org.ldaptive.Credential;
 import org.ldaptive.LdapEntry;
+import org.ldaptive.pool.PooledConnectionFactory;
+import org.ldaptive.pool.SoftLimitConnectionPool;
 
 import javax.security.auth.Subject;
 import javax.security.auth.callback.*;
@@ -28,9 +28,9 @@ public class TenantLdapLoginModule extends AbstractLoginModule {
     private AuthenticationRequest authRequest;
 
     /** Tenant organization domain name used to lookup pool */
-    private String tenantOrgDn = null;
-    private String username = null;
-    private char[] password = null;
+    private String tenantOrgDn;
+    private String username;
+    private char[] password;
 
     @Override
     public void initialize( final Subject subject, final CallbackHandler callbackHandler,
@@ -38,6 +38,16 @@ public class TenantLdapLoginModule extends AbstractLoginModule {
 
         setLdapPrincipal = true;
         setLdapCredential = true;
+
+        tenantOrgDn = null;
+        username = null;
+        password = null;
+        auth = null;
+        authRequest = null;
+
+        Map <PooledSearchDnResolver, SoftLimitConnectionPool> pools;
+        PooledSearchDnResolver searchDnResolver = null;
+        SoftLimitConnectionPool pool = null;
 
         TenantCallbackHandler tenantCallbackHandler = new TenantCallbackHandler(callbackHandler);
         this.callbackHandler = tenantCallbackHandler;
@@ -61,7 +71,15 @@ public class TenantLdapLoginModule extends AbstractLoginModule {
 
         for (String key : options.keySet()) {
             if (tenantOrgDn.equalsIgnoreCase(key)) {
-                auth = (Authenticator) options.get(key);
+                pools = (Map<PooledSearchDnResolver,SoftLimitConnectionPool>) options.get(key);
+                for (PooledSearchDnResolver resolver : pools.keySet()) {
+                    searchDnResolver = resolver;
+                    pool = pools.get(resolver);
+                }
+
+
+                PooledBindAuthenticationHandler bindAuthenticationHandler = new PooledBindAuthenticationHandler(new PooledConnectionFactory(pool));
+                auth = new Authenticator(searchDnResolver,bindAuthenticationHandler);
             }
         }
 
@@ -120,5 +138,6 @@ public class TenantLdapLoginModule extends AbstractLoginModule {
     protected boolean login(final NameCallback nameCb, final PasswordCallback passCb) throws LoginException {
         return true;
     }
+
 
 }

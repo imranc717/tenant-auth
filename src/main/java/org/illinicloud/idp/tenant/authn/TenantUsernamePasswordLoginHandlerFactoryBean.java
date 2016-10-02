@@ -15,10 +15,8 @@ import java.util.Map;
 import org.jasypt.encryption.pbe.StandardPBEStringEncryptor;
 
 import org.ldaptive.*;
-import org.ldaptive.auth.Authenticator;
-import org.ldaptive.auth.PooledBindAuthenticationHandler;
 import org.ldaptive.auth.PooledSearchDnResolver;
-import org.ldaptive.cache.LRUCache;
+import org.ldaptive.auth.SearchDnResolver;
 import org.ldaptive.pool.*;
 import org.ldaptive.provider.jndi.JndiProvider;
 import org.ldaptive.provider.jndi.JndiProviderConfig;
@@ -32,8 +30,11 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
     private String authenticationServletURL;
     private String jndiName;
     private StandardPBEStringEncryptor encryptor;
+    private Integer minSize;
+    private Integer maxSize;
     private Map<String,Map> tenants = new HashMap<String, Map>();
-    private Map<String,Authenticator> authPools = new HashMap<String, Authenticator>();
+    private Map<String,SoftLimitConnectionPool> pools = new HashMap<String, SoftLimitConnectionPool>();
+    private Map<String, PooledSearchDnResolver> dnResolvers = new HashMap<String, PooledSearchDnResolver>();
 
     public String getAuthenticationServletURL() {
         return authenticationServletURL;
@@ -55,13 +56,19 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
         encryptor = enc;
     }
 
+    public Integer getMinSize() { return minSize; }
+
+    public void setMinSize(Integer lowEnd) { minSize = lowEnd; }
+
+    public Integer getMaxSize() { return maxSize; }
+
+    public void setMaxSize(Integer topEnd) { maxSize = topEnd; }
+
     public void setTenants(Map<String,Map> tenantConfigs) {
         tenants = tenantConfigs;
     }
 
-    public void setAuthPools(Map<String,Authenticator> pools) {
-        authPools = pools;
-    }
+
     /** {@inheritDoc} */
     protected Object createInstance() throws Exception {
 
@@ -70,7 +77,10 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
 
         getTenantConfigs();
         initializePools();
-        handler.setTenantPools(authPools);
+        /*handler.setTenantPools(authPools);*/
+        /*handler.setConnFactoryPools(factoryPools);*/
+        handler.setPools(pools);
+        handler.setSearchDnResolvers(dnResolvers);
         handler.setEncryptor(encryptor);
         return handler;
     }
@@ -95,7 +105,8 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
                 .append("d.connection_id = c.id AND ")
                 .append("d.filter_id = f.id AND ")
                 .append("d.data_store_type_id = 1 AND ")
-                .append("e.approved=1 AND ")
+                .append("e.approved = 1 AND ")
+                .append("e.active = 1 AND ")
                 .append("(o.primary_id = 2 or o.primary_id = 3);").toString();
 
         try {
@@ -150,7 +161,9 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
 
     protected void initializePools() {
 
+        log.info("Initializing district connection pools");
         Integer timeout = new Integer (5000);
+        Integer validatePeriod = new Integer (300);
 
         KeyStoreCredentialConfig credentialConfig = new KeyStoreCredentialConfig();
         credentialConfig.setTrustStore("classpath:/cacerts");
@@ -162,9 +175,13 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
             Map<String,String> value = entry.getValue();
 
             PoolConfig poolConfig = new PoolConfig();
+            poolConfig.setMinPoolSize(minSize);
+            poolConfig.setMaxPoolSize(maxSize);
+            poolConfig.setValidatePeriodically(true);
+            poolConfig.setValidatePeriod(validatePeriod.longValue());
+            poolConfig.setValidateOnCheckOut(true);
             AllowAnyHostnameVerifier allowAnyHostnameVerifier = new AllowAnyHostnameVerifier();
             SslConfig sslConfig = new SslConfig(credentialConfig);
-            /*sslConfig.setTrustManagers(new HostnameVerifyingTrustManager(allowAnyHostnameVerifier));*/
 
             String ldapURL = "ldap://" + value.get("host") + ":" + value.get("port");
             ConnectionConfig connectionConfig = new ConnectionConfig();
@@ -181,15 +198,14 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
             jndiProviderConfig.setHostnameVerifier(allowAnyHostnameVerifier);
             JndiProvider jndiProvider = new JndiProvider();
             jndiProvider.setProviderConfig(jndiProviderConfig);
-
             DefaultConnectionFactory cf = new DefaultConnectionFactory(connectionConfig,jndiProvider);
-            LRUCache<SearchRequest> cache = new LRUCache(50, 600, 300);
 
-            BlockingConnectionPool pool = new BlockingConnectionPool(poolConfig, cf);
-            pool.setBlockWaitTime(30000);
+            SoftLimitConnectionPool pool = new SoftLimitConnectionPool(poolConfig, cf);
             pool.setName(key);
-            pool.setPruneStrategy(new IdlePruneStrategy());
-            /*pool.setValidator(compareValidator);*/
+            pool.setValidator(new SearchValidator());
+            SoftLimitConnectionPool dnResolverPool = new SoftLimitConnectionPool(poolConfig,cf);
+            dnResolverPool.setName("dnResolver"+key);
+            dnResolverPool.setValidator(new SearchValidator());
 
             try {
                 pool.initialize();
@@ -198,19 +214,25 @@ public class TenantUsernamePasswordLoginHandlerFactoryBean extends AbstractLogin
                 log.error(e.getMessage());
             }
 
+            try {
+                dnResolverPool.initialize();
+            } catch (IllegalStateException e) {
+                log.error("Unable to initialize dnResolver connection pool for host {}", ldapURL);
+                log.error(e.getMessage());
+            }
 
-            PooledConnectionFactory connFactory = new PooledConnectionFactory(pool);
 
-            PooledSearchDnResolver dnResolver = new PooledSearchDnResolver(connFactory);
+            /*SearchDnResolver dnResolver = new SearchDnResolver();
             dnResolver.setBaseDn(value.get("baseDN"));
             dnResolver.setUserFilter("(" + value.get("filter") + "={user})");
-            dnResolver.setSearchCache(cache);
             dnResolver.setSubtreeSearch(true);
-
-            PooledBindAuthenticationHandler bindAuthenticationHandler = new PooledBindAuthenticationHandler(connFactory);
-            Authenticator auth = new Authenticator(dnResolver,bindAuthenticationHandler);
-
-            authPools.put(key,auth);
+            dnResolver.setConnectionFactory(cf);*/
+            PooledSearchDnResolver dnResolver = new PooledSearchDnResolver(new PooledConnectionFactory(dnResolverPool));
+            dnResolver.setBaseDn(value.get("baseDN"));
+            dnResolver.setUserFilter("(" + value.get("filter") + "={user})");
+            dnResolver.setSubtreeSearch(true);
+            pools.put(key, pool);
+            dnResolvers.put(key,dnResolver);
         }
     }
 

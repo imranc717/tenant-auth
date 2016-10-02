@@ -93,5 +93,33 @@ public class TenantUsernamePasswordLoginHandlerBeanDefinitionParser extends Abst
         jndiName = names.get(0).getTextContent();
         builder.addPropertyValue("jndiName", jndiName);
 
+        /** parse PoolSettings configuration element */
+        List<Element> poolSettings = XMLHelper.getChildElementsByTagNameNS(config, "http://illinicloud.org/idp/tenant/authn", "PoolSettings");
+        if ((poolSettings == null) || (poolSettings.isEmpty())) {
+            throw new BeanCreationException("A pool setting configuration must be specified.");
+        }
+
+        /** add Property Value for minSize */
+        int minSize;
+        List<Element> lowEnd = XMLHelper.getChildElementsByTagNameNS(poolSettings.get(0), "http://illinicloud.org/idp/tenant/authn", "minSize");
+        if ((lowEnd == null) || (lowEnd.size() != 1))
+        {
+            String msg = String.format("%s, an unique '%s' element was excepted.", new Object[] { encryption.get(0).getNodeName(), "minSize" });
+            throw new BeanCreationException(msg);
+        }
+        minSize = Integer.parseInt(lowEnd.get(0).getTextContent());
+        builder.addPropertyValue("minSize", minSize);
+
+        /** add Property Value for maxSize */
+        int maxSize;
+        List<Element> topEnd = XMLHelper.getChildElementsByTagNameNS(poolSettings.get(0), "http://illinicloud.org/idp/tenant/authn", "maxSize");
+        if ((topEnd == null) || (topEnd.size() != 1))
+        {
+            String msg = String.format("%s, an unique '%s' element was excepted.", new Object[] { encryption.get(0).getNodeName(), "maxSize" });
+            throw new BeanCreationException(msg);
+        }
+        maxSize = Integer.parseInt(topEnd.get(0).getTextContent());
+        builder.addPropertyValue("maxSize", maxSize);
+
     }
 }

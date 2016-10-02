@@ -23,6 +23,14 @@
                             </sequence>
                         </complexType>
                     </element>
+                    <element name="PoolSettings">
+                        <complexType>
+                            <sequence>
+                                <element name="minSize" type="integer"/>
+                                <element name="maxSize" type="integer"/>
+                            </sequence>
+                        </complexType>
+                    </element>
                 </sequence>
                 <attribute name="authenticationServletURL" type="string"/>
             </extension>

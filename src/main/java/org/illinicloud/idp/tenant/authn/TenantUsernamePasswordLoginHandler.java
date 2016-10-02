@@ -3,13 +3,14 @@ package org.illinicloud.idp.tenant.authn;
 import edu.internet2.middleware.shibboleth.idp.authn.provider.AbstractLoginHandler;
 import edu.internet2.middleware.shibboleth.idp.util.HttpServletHelper;
 import org.jasypt.encryption.pbe.StandardPBEStringEncryptor;
+import org.ldaptive.auth.PooledSearchDnResolver;
+import org.ldaptive.pool.SoftLimitConnectionPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.Map;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import org.ldaptive.auth.Authenticator;
 
 /**
  * Authenticate a username and password against a JAAS Source while leveraging connection pooling.
@@ -31,7 +32,10 @@ public class TenantUsernamePasswordLoginHandler extends AbstractLoginHandler {
     private String authenticationServletPath;
 
     /** Map containing all LEA ldap pools */
-    private Map<String,Authenticator> tenantPools;
+    private Map<String,SoftLimitConnectionPool> pools;
+
+    /** Map containing all LEA ldap pooled search dn resolvers */
+    private Map<String,PooledSearchDnResolver> searchDnResolvers;
 
     /** Encryptor used to decrypt bind credentials */
     private StandardPBEStringEncryptor encryptor;
@@ -50,14 +54,25 @@ public class TenantUsernamePasswordLoginHandler extends AbstractLoginHandler {
 
     }
 
-    public Map<String,Authenticator> getTenantPools()
+
+    public Map<String,SoftLimitConnectionPool> getPools()
     {
-        return tenantPools;
+        return pools;
     }
 
-    public void setTenantPools(Map<String, Authenticator> pools)
+    public void setPools(Map<String, SoftLimitConnectionPool> connPools)
     {
-        tenantPools = pools;
+        pools = connPools;
+    }
+
+    public Map<String,PooledSearchDnResolver> getSearchDnResolvers()
+    {
+        return searchDnResolvers;
+    }
+
+    public void setSearchDnResolvers(Map<String, PooledSearchDnResolver> searchResolvers)
+    {
+        searchDnResolvers = searchResolvers;
     }
 
     public void setEncryptor(StandardPBEStringEncryptor enc) { encryptor = enc;}
